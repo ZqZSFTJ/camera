@@ -1,0 +1,11 @@
+source;share/tutorial_inferfaces/hook/cmake_prefix_path.ps1
+source;share/tutorial_inferfaces/hook/cmake_prefix_path.dsv
+source;share/tutorial_inferfaces/hook/cmake_prefix_path.sh
+source;share/tutorial_inferfaces/hook/ld_library_path_lib.ps1
+source;share/tutorial_inferfaces/hook/ld_library_path_lib.dsv
+source;share/tutorial_inferfaces/hook/ld_library_path_lib.sh
+source;share/tutorial_inferfaces/local_setup.bash
+source;share/tutorial_inferfaces/local_setup.dsv
+source;share/tutorial_inferfaces/local_setup.ps1
+source;share/tutorial_inferfaces/local_setup.sh
+source;share/tutorial_inferfaces/local_setup.zsh

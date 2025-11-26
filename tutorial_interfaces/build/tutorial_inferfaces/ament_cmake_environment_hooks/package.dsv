@@ -1,0 +1,4 @@
+source;share/tutorial_inferfaces/local_setup.bash
+source;share/tutorial_inferfaces/local_setup.dsv
+source;share/tutorial_inferfaces/local_setup.sh
+source;share/tutorial_inferfaces/local_setup.zsh

@@ -1,0 +1,6 @@
+{
+  "package_name": "tutorial_inferfaces",
+  "non_idl_tuples": [
+    "/home/zqz/ros2_ws/tutorial_inferfaces:msg/Detection.msg"
+  ]
+}

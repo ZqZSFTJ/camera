@@ -1,0 +1,79 @@
+{
+	"backtrace" : 1,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_custom_target"
+		],
+		"files" : 
+		[
+			"build/tutorial_inferfaces/tutorial_inferfaces__py/CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 34,
+				"parent" : 0
+			}
+		]
+	},
+	"dependencies" : 
+	[
+		{
+			"id" : "tutorial_inferfaces::@6890427a1f51a3e7e1df"
+		}
+	],
+	"id" : "tutorial_inferfaces__py::@cddf8de357933dbfe486",
+	"name" : "tutorial_inferfaces__py",
+	"paths" : 
+	{
+		"build" : "tutorial_inferfaces__py",
+		"source" : "build/tutorial_inferfaces/tutorial_inferfaces__py"
+	},
+	"sourceGroups" : 
+	[
+		{
+			"name" : "",
+			"sourceIndexes" : 
+			[
+				0
+			]
+		},
+		{
+			"name" : "CMake Rules",
+			"sourceIndexes" : 
+			[
+				1,
+				2
+			]
+		}
+	],
+	"sources" : 
+	[
+		{
+			"backtrace" : 1,
+			"isGenerated" : true,
+			"path" : "build/tutorial_inferfaces/tutorial_inferfaces__py/CMakeFiles/tutorial_inferfaces__py",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 0,
+			"isGenerated" : true,
+			"path" : "build/tutorial_inferfaces/tutorial_inferfaces__py/CMakeFiles/tutorial_inferfaces__py.rule",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 0,
+			"isGenerated" : true,
+			"path" : "build/tutorial_inferfaces/rosidl_generator_py/tutorial_inferfaces/_tutorial_inferfaces_s.ep.rosidl_typesupport_fastrtps_c.c.rule",
+			"sourceGroupIndex" : 1
+		}
+	],
+	"type" : "UTILITY"
+}
