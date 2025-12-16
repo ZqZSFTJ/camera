@@ -21,6 +21,8 @@
 #include <NvInferPlugin.h>
 #include <NvOnnxParser.h>
 #include <cuda_runtime_api.h>
+#include <cuda_runtime.h>
+
 
 struct Detection
 {
@@ -57,7 +59,7 @@ public:
     }
 
     std::vector<Detection> runInference(const cv::Mat &input);
-    std::vector<Detection> runInferenceTensorRT(const cv::Mat &input);
+    std::vector<Detection> runInference_TensorRT(const cv::Mat &input);
     void loadTensorRTEngine(const std::string &enginePath);
     //void setTensoRTOptions(bool fp16 = true, bool useINT8 = false, size_t workspaceSize = 1 << 30);
 
@@ -88,7 +90,7 @@ private:
     bool cudaEnabled{};
     //bool TRTEnabled{false};
     bool useTensorRT{};
-    Logger gLogger;
+    //Logger gLogger;
     void** buffers;
     //std::shared_ptr<nvinfer1::IRuntime> runtimeTRT;
     //std::shared_ptr<nvinfer1::ICudaEngine> trtEngine;
@@ -139,7 +141,7 @@ public:
     }
 
     std::vector<Detection> runInference(const cv::Mat &input);
-    std::vector<Detection> runInferenceTensorRT(const cv::Mat &input);
+    std::vector<Detection> runInference_TensorRT(const cv::Mat &input);
     void loadTensorRTEngine(const std::string &enginePath);
     //void setTensoRTOptions(bool fp16 = true, bool useINT8 = false, size_t workspaceSize = 1 << 30);
 
@@ -193,6 +195,7 @@ private:
     cudaStream_t cudaStream{nullptr};
     //std::vector<void*> deviceBuffers[2]{nullptr, nullptr};
     std::vector<void*> deviceBuffers;
+    //void* deviceBuffers[100];
     int inputIndex{-1};
     int outputIndex{-1};
     size_t inputSize{0};
