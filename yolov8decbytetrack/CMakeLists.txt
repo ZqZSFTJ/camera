@@ -10,7 +10,7 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 # ===================== CUDA / TensorRT =====================
 set(CUDA_TOOLKIT_ROOT_DIR "/usr/local/cuda-12.9")
-set(TensorRT_ROOT "/home/zqz/TensorRT-10.13.3.9")
+set(TensorRT_ROOT "/media/zqz/H/ubuntu_download/TensorRT-10.13.3.9")
 set(msg_file "tutorial_inferfaces/msg/Detection.msg")
 set(tutorial_interfaces_dir "/home/zqz/ros2_ws/tutorial_interfaces")
 

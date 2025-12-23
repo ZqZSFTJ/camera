@@ -25,6 +25,40 @@ Inference_trt::Inference_trt(const std::string &enginePath,const cv::Size &model
     //cudaStreamCreate(&stream);
 }
 
+
+
+inline float sigmoid(float x)
+{
+    return 1.0f / (1.0f + std::exp(-x));
+}
+
+void nms_(std::vector<Detection>& detections,float iouThreshold)
+{
+    std::sort(detections.begin(), detections.end(),[](const Detection& a, const Detection& b) {return a.confidence > b.confidence;});
+    std::vector<bool> keep(detections.size(), true);
+
+    for (size_t i = 0; i < detections.size(); i++)
+    {
+        if (!keep[i]) continue;
+        const cv::Rect& box_i = detections[i].box;
+        for (size_t j = i + 1; j < detections.size(); j++)
+        {
+            if (!keep[j]) continue;
+            const cv::Rect& box_j = detections[j].box;
+            float interArea = (box_i & box_j).area();
+            float unionArea = box_i.area() + box_j.area() - interArea;
+            float iou = interArea / unionArea;
+            if (iou > iouThreshold) keep[j] = false;
+        }
+    }
+    std::vector<Detection> nmsDetections;
+    for (size_t i = 0; i< detections.size(); i++)
+    {
+        if (keep[i]) nmsDetections.push_back(detections[i]);
+    }
+    detections = std::move(nmsDetections);
+}
+
 static void print_dims(const nvinfer1::Dims& d)
 {
     std::cout << "Dims.nbDims=" << d.nbDims << "[";
@@ -244,19 +278,19 @@ void Inference_trt::loadTensorRTEngine(const std::string &enginePath)
         if (ioMode == nvinfer1::TensorIOMode::kINPUT) {
             inputIndex = i;
             inputTensorName = tensorName;
-            std::cout << "Input tensor: " << inputTensorName << std::endl;
+            //std::cout << "Input tensor: " << inputTensorName << std::endl;
         } else if (ioMode == nvinfer1::TensorIOMode::kOUTPUT) {
             outputIndex = i;
             outputTensorName = tensorName;
-            std::cout << "Output tensor: " << outputTensorName << std::endl;
+            //std::cout << "Output tensor: " << outputTensorName << std::endl;
         }
     }
     
     // 获取输入输出维度
     nvinfer1::Dims inputDims = trtEngine->getTensorShape(inputTensorName.c_str());
     nvinfer1::Dims outputDims = trtEngine->getTensorShape(outputTensorName.c_str());
-    std::cout << "input dims:" ;print_dims(inputDims);
-    std::cout <<"output dims:" ;print_dims(outputDims);
+    //std::cout << "input dims:" ;print_dims(inputDims);
+    //std::cout <<"output dims:" ;print_dims(outputDims);
     
     // 获取数据类型
     nvinfer1::DataType inputDataType = trtEngine->getTensorDataType(inputTensorName.c_str());
@@ -277,9 +311,9 @@ void Inference_trt::loadTensorRTEngine(const std::string &enginePath)
     trtContext->setOutputTensorAddress(outputTensorName.c_str(), deviceBuffers[outputIndex]);
     
     std::cout << "TensorRT engine loaded successfully" << std::endl;
-    std::cout << "" << std::endl;
-    std::cout << "Input tensor: " << inputTensorName << ", size: " << inputSize << " bytes" << std::endl;
-    std::cout << "Output tensor: " << outputTensorName << ", size: " << outputSize << " bytes" << std::endl;
+    //std::cout << "" << std::endl;
+    //std::cout << "Input tensor: " << inputTensorName << ", size: " << inputSize << " bytes" << std::endl;
+    //std::cout << "Output tensor: " << outputTensorName << ", size: " << outputSize << " bytes" << std::endl;
     cudaStreamCreate(&cudaStream);
 
 }
@@ -291,8 +325,14 @@ std::vector<Detection> Inference_trt::runInference_TensorRT(const cv::Mat &input
     {
         throw std::runtime_error("TensorRT engine not loaded");
     }
+
+    cv::Mat modelInput = input;
+    int pad_x, pad_y;
+    float scale;
+    if (letterBoxForSquare && modelShape.width == modelShape.height)
+        modelInput = formatToSquare(modelInput, &pad_x, &pad_y, &scale);
     cv::Mat inputBlob;
-    cv::dnn::blobFromImage(input, inputBlob, 1.0/255.0, modelShape, cv::Scalar(), true, false);
+    cv::dnn::blobFromImage(modelInput, inputBlob, 1.0/255.0, modelShape, cv::Scalar(), true, false);
     size_t blob_bytes = inputBlob.total() * inputBlob.elemSize();
     if (blob_bytes > inputSize)
     {
@@ -330,108 +370,148 @@ std::vector<Detection> Inference_trt::runInference_TensorRT(const cv::Mat &input
     //nvinfer1::Dims outputDims = trtEngine->getTensorShape(outputTensorName.c_str());
     //float* output = static_cast<float*>(buffers[outputIndex]);
     float* output = outputData.data();
-    std::vector<Detection> detections{};
+    std::vector<Detection> detections;
     
     // 在loadTensorRTEngine函数中添加
     nvinfer1::Dims outputDims = trtEngine->getTensorShape(outputTensorName.c_str());
-    print_dims(outputDims);
+    //print_dims(outputDims);
+    
+    int num_preds = 0;
+    int elem_per_pred = 0;
+    bool is_field_major =false;
 
-    size_t total_elems = outputSize / sizeof(float);
-    int inferred_dims = 0;
-    int inferred_rows = 0;
-    bool has_objectness = false;
-    int num_classes_known = static_cast<int>(classes.size());
-
-    if (num_classes_known > 0 )
+    if (outputDims.nbDims == 3)
     {
-        int cand1 = num_classes_known + 4;
-        int cand2 = num_classes_known + 5;
-        if (cand1 > 0 && (total_elems % cand1) == 0)
-        {
-            inferred_dims = cand1;
-            inferred_rows = static_cast<int>(total_elems / inferred_dims);
-            has_objectness = false;
+        int d0 = (outputDims.nbDims > 0) ? outputDims.d[0] : 0;
+        int d1 = (outputDims.nbDims > 1) ? outputDims.d[1] : 0;
+        int d2 = (outputDims.nbDims > 2) ? outputDims.d[2] : 0;
+
+        //std::cout << "DEBUG outputDims: nbDims=" << outputDims.nbDims
+        //        << " d0=" << d0 << " d1=" << d1 << " d2=" << d2 << std::endl;
+
+        // 更稳健的退化处理：优先检测某维为5（即只有 cx,cy,w,h,obj_logit）
+        if (d1 == 5 && d2 > 5) {
+            elem_per_pred = 5;
+            num_preds = d2;
+            is_field_major = true; // layout: [1,5,8400]
+            //std::cout << "DEBUG layout: field-major [1,5,N], elem_per_pred=5, num_preds=" << num_preds << std::endl;
         }
-        else if (cand2 > 0 && (total_elems & cand2) == 0)
-        {
-            inferred_dims = cand2;
-            inferred_rows = static_cast<int>(total_elems / inferred_dims);
-            has_objectness = true;
+        else if (d2 == 5 && d1 > 5) {
+            elem_per_pred = 5;
+            num_preds = d1;
+            is_field_major = false; // layout: [1,N,5]
+            //std::cout << "DEBUG layout: pred-major [1,N,5], elem_per_pred=5, num_preds=" << num_preds << std::endl;
+        }
+        else {
+            // 原有的通用判定：如果一个维度明显大于另一个，按字段/预测顺序判断
+            if (d1 >= 5 && d2 >= 5) {
+                if (d1 > d2) {
+                    elem_per_pred = d1;
+                    num_preds = d2;
+                    is_field_major = true;
+                } else {
+                    elem_per_pred = d2;
+                    num_preds = d1;
+                    is_field_major = false;
+                }
+            } else {
+                // 退回原先的保守猜测（尽量不颠倒 5 与 N）
+                elem_per_pred = std::max(d1, d2);
+                num_preds = std::min(d1, d2);
+                is_field_major = (d1 > d2);
+            }
+            //std::cout << "DEBUG fallback layout: elem_per_pred=" << elem_per_pred << " num_preds=" << num_preds
+            //        << " is_field_major=" << is_field_major << std::endl;
         }
     }
 
-    for (int i = 0; i< inferred_rows; i++)
+
+    //int num_preds = outputDims.d[2];
+    //int elem_per_pred = 5;
+    
+    //const int num_preds = 8400;
+    //const int elem_per_pred = 5;//cx,cy,w,h,conf
+    //bool is_field_major = (outputDims.nbDims == 3 && outputDims.d[0] == 1 && outputDims.d[1] == 5);
+    auto get_output = [&](int pred_idx,int field_idx)->float
     {
-        float* ptr = output + i * inferred_dims;
-
-        if(has_objectness)
+        if(is_field_major)
         {
-            float objectness = ptr[4];
-            float* classes_scores = ptr + 5;
-            int classes_count = inferred_dims - 5;
-            if(classes_count <= 0)
+            return outputData[field_idx * num_preds + pred_idx];
+        }
+        else 
+        {
+            return outputData[pred_idx * elem_per_pred + field_idx];
+        }
+    };
+
+    //std::vector<Detection> detections;
+    detections.reserve(std::min(num_preds, 4096));
+    const int INPUT_SIZE = 640;
+    const int strides[3] = {8, 16, 32};
+    const int grids[3]   = {80, 40, 20};
+    for (int i = 0; i <num_preds; i++)
+    {
+        float conf = output[4 * num_preds + i];
+        if (conf < modelScoreThreshold) continue;
+        float best_score = sigmoid(conf);
+        float cx = output[0 * num_preds + i];
+        float cy = output[1 * num_preds + i];
+        float w  = output[2 * num_preds + i];
+        float h  = output[3 * num_preds + i];
+
+        float x1 = cx - w * 0.5f;
+        float y1 = cy - h * 0.5f;
+        float x2 = cx + w * 0.5f;
+        float y2 = cy + h * 0.5f;
+
+        // de-letterbox
+        x1 = (x1 - pad_x) / scale;
+        y1 = (y1 - pad_y) / scale;
+        x2 = (x2 - pad_x) / scale;
+        y2 = (y2 - pad_y) / scale;
+
+        x1 = std::clamp(x1, 0.f, static_cast<float>(input.cols - 1));
+        y1 = std::clamp(y1, 0.f, static_cast<float>(input.rows - 1));
+        x2 = std::clamp(x2, 0.f, static_cast<float>(input.cols - 1));
+        y2 = std::clamp(y2, 0.f, static_cast<float>(input.rows - 1));
+        int best_class = 0;
+        Detection det;
+        det.box = cv::Rect(static_cast<int>(std::round(x1)),
+                           static_cast<int>(std::round(y1)),
+                           static_cast<int>(std::round(x2 - x1)),
+                           static_cast<int>(std::round(y2 - y1)));
+        det.confidence = best_score;
+        if (!classes.empty())
+        {
+            if (best_class >=0 && best_class <static_cast<int>(classes.size()))
             {
-                continue;
-            }
-            cv::Mat scores(1,classes_count, CV_32FC1, classes_scores);
-            cv::Point class_id;
-            double maxClassScore;
-            minMaxLoc(scores, 0, &maxClassScore, 0, &class_id);
-
-            if(objectness >= modelConfidenceThreshold && maxClassScore > modelScoreThreshold)
-            {
-                Detection det;
-                det.class_id = class_id.x;
-                det.confidence = static_cast<float>(objectness * maxClassScore);
-
-                float cx = ptr[0];
-                float cy = ptr[1];
-                float w = ptr[2];
-                float h = ptr[3];
-
-                det.box = cv::Rect(static_cast<int>(cx - w/2.0f), static_cast<int>(cy - h/2.0f), static_cast<int>(w), static_cast<int>(h));
-                if (det.class_id >=0 && det.class_id < static_cast<int>(classes.size()))
-                {
-                    det.className = classes[det.class_id];
-                }
-                detections.push_back(det);
+                det.className = classes[best_class];
             }
             else 
             {
-                {
-                    float* classes_scores = ptr + 4;
-                    int classes_count = inferred_dims - 4;
-                    if (classes_count <= 0 )
-                    {
-                        continue;
-                    }
-                    cv::Mat scores(1, classes_count, CV_32FC1, classes_scores);
-                    cv::Point class_id;
-                    double maxClassScore;
-                    minMaxLoc(scores, 0, &maxClassScore, 0, &class_id);
-
-                    if (maxClassScore > modelScoreThreshold)
-                    {
-                        Detection det;
-                        det.class_id = class_id.x;
-                        det.confidence = static_cast<float>(maxClassScore);
-
-                        float cx = ptr[0];
-                        float cy = ptr[1];
-                        float w = ptr[2];
-                        float h = ptr[3];
-
-                        det.box = cv::Rect(static_cast<int>(cx - w/2.0f), static_cast<int>(cy - h/2.0f), static_cast<int>(w), static_cast<int>(h));
-                        if (det.class_id >=0 && det.class_id < static_cast<int>(classes.size()))
-                        {
-                            det.className = classes[det.class_id];
-                        }
-                        detections.push_back(det);
-                    }
-                }
+                det.className = classes[0];
             }
         }
+        else 
+        {
+            det.className = (best_class >=0) ? ("class_" + std::to_string(best_class)) : "unknown";
+        }
+
+
+
+
+
+        detections.push_back(det);
     }
+
+    nms_(detections,0.1f);
+
+
+    //size_t total_elems = outputSize / sizeof(float);
+    //int num_classes_known = static_cast<int>(classes.size());
+
+   
+    
     //if (outputDims.nbDims == 3 && outputDims.d[1] > 4) 
     //{
     //    numClasses = outputDims.d[1] - 4;
@@ -524,3 +604,25 @@ cv::Mat Inference::formatToSquare(const cv::Mat &source, int *pad_x, int *pad_y,
     resized.release();
     return result;
 }
+
+cv::Mat Inference_trt::formatToSquare(const cv::Mat &source, int *pad_x, int *pad_y, float *scale)
+{
+    int col = source.cols;
+    int row = source.rows;
+    int m_inputWidth = modelShape.width;
+    int m_inputHeight = modelShape.height;
+
+    *scale = std::min(m_inputWidth / (float)col, m_inputHeight / (float)row);
+    int resized_w = col * *scale;
+    int resized_h = row * *scale;
+    *pad_x = (m_inputWidth - resized_w) / 2;
+    *pad_y = (m_inputHeight - resized_h) / 2;
+
+    cv::Mat resized;
+    cv::resize(source, resized, cv::Size(resized_w, resized_h));
+    cv::Mat result = cv::Mat::zeros(m_inputHeight, m_inputWidth, source.type());
+    resized.copyTo(result(cv::Rect(*pad_x, *pad_y, resized_w, resized_h)));
+    resized.release();
+    return result;
+}
+

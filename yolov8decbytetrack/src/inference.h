@@ -61,6 +61,8 @@ public:
     std::vector<Detection> runInference(const cv::Mat &input);
     std::vector<Detection> runInference_TensorRT(const cv::Mat &input);
     void loadTensorRTEngine(const std::string &enginePath);
+    void setModelConfidenceThreshold(float val) { modelConfidenceThreshold = val; }
+    void setLetterBoxForSquare(bool val) { letterBoxForSquare = val; }
     //void setTensoRTOptions(bool fp16 = true, bool useINT8 = false, size_t workspaceSize = 1 << 30);
 
 private:
@@ -143,6 +145,8 @@ public:
     std::vector<Detection> runInference(const cv::Mat &input);
     std::vector<Detection> runInference_TensorRT(const cv::Mat &input);
     void loadTensorRTEngine(const std::string &enginePath);
+    void setModelConfidenceThreshold(float val) { modelConfidenceThreshold = val; }
+    void setLetterBoxForSquare(bool val) { letterBoxForSquare = val; }
     //void setTensoRTOptions(bool fp16 = true, bool useINT8 = false, size_t workspaceSize = 1 << 30);
 
 private:

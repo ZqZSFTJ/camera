@@ -1,0 +1,3 @@
+/home/zqz/ros2_ws/yolov8decbytetrack/build/CMakeFiles/trt_infer_demo.dir
+/home/zqz/ros2_ws/yolov8decbytetrack/build/CMakeFiles/edit_cache.dir
+/home/zqz/ros2_ws/yolov8decbytetrack/build/CMakeFiles/rebuild_cache.dir

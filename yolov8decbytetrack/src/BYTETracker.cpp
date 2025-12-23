@@ -24,7 +24,7 @@ byte_track::BYTETracker::BYTETracker(const int& frame_rate,
 
 byte_track::BYTETracker::~BYTETracker()
 {
-    std::cout << "BYTETracker destroyed" << std::endl;
+    //std::cout << "BYTETracker destroyed" << std::endl;
 }
 
 std::vector<byte_track::BYTETracker::STrackPtr> byte_track::BYTETracker::update(const std::vector<Object>& objects)

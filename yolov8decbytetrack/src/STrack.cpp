@@ -21,6 +21,7 @@ byte_track::STrack::~STrack()
 {
 }
 
+
 const byte_track::Rect<float>& byte_track::STrack::getRect() const
 {
     return rect_;
