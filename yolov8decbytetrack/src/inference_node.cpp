@@ -84,9 +84,14 @@ void remove_same_obj(std::vector<Detection>& output_armor)
 }
 
 // Run TensorRT inference for a frame using provided Inference_trt instance
-static std::vector<Detection> inferencethrow(Inference_trt& inf_car, cv::Mat& frame)
+static std::vector<Detection> inferencethrow_trt(Inference_trt& inf_car, cv::Mat& frame)
 {
     return inf_car.runInference_TensorRT(frame);
+}
+
+static std::vector<Detection> inferencethrow_onnx(Inference& inf_car, cv::Mat& frame)
+{
+    return inf_car.runInference(frame);
 }
 
 // Convert detections -> byte_track::Object vector
@@ -126,13 +131,17 @@ public:
 
         // TensorRT engine paths (adjust to your environment)
         std::string car_engine = "/home/zqz/ros2_ws/model2/best8.engine";
-        //
+        //std::string car_onnx = "/home/zqz/ros2_ws/model2/car.onnx";
+        inf_car_trt = std::make_unique<Inference_trt>(car_engine, cv::Size(640,640), classes_all, runOnGPU_);
+
         Inference inf_armor("/home/zqz/ros2_ws/model2/armor.onnx", cv::Size(640, 640), classes_armor, runOnGPU_);
         inf_armor_ = std::make_unique<Inference>(inf_armor);
         // create TensorRT inference instance for car detection
-        inf_car_ = std::make_unique<Inference_trt>(car_engine, cv::Size(1024,1024), classes_all, runOnGPU_);
-        inf_car_->setModelConfidenceThreshold(0.25f);
-        inf_car_->setLetterBoxForSquare(true);
+        
+        //Inference inf_car(car_onnx, cv::Size(640,640), classes_all, runOnGPU_);
+        //inf_car_onnx = std::make_unique<Inference>(inf_car);
+        inf_car_trt->setModelConfidenceThreshold(0.25f);
+        inf_car_trt->setLetterBoxForSquare(true);
 
 
         publisher_detection = this->create_publisher<tutorial_interfaces::msg::Detection>("detection_topic", 10);
@@ -244,7 +253,14 @@ private:
             std::cout << "开始采集 (HikCamera)" << std::endl;
             bool running = true;
             std::this_thread::sleep_for(std::chrono::seconds(1));
-
+            cv::VideoWriter writer;
+            std::cout << "是否保存处理后结果 (y/n)" << std::endl;
+            std::string save_option;
+            std::cin >> save_option;
+            if (save_option == "y")
+            {
+                writer.open("output.mp4", cv::VideoWriter::fourcc('H','2','6','4'), 30, cv::Size(1920,1080));
+            }
             while (running)
             {
                 cv::Mat frame_rgb = hik_camera.getLatestFrame();
@@ -260,7 +276,8 @@ private:
                 std::vector<Detection> detections;
                 try 
                 {
-                    detections = inferencethrow(*inf_car_, frame);
+                    detections = inferencethrow_trt(*inf_car_trt, frame);
+                    //detections = inferencethrow_onnx(*inf_car_, frame);
                 } 
                 catch (const std::exception& e) 
                 {
@@ -295,12 +312,19 @@ private:
                         
                 }
                 publisher_detection->publish(msg);
-
+                if (save_option == "y")
+                {
+                    writer.write(frame);
+                }
                 cv::imshow("Detection", frame);
                 if (cv::waitKey(1) == 27)
                 {
-                    cv::destroyAllWindows();
                     running = false;
+                    cv::destroyAllWindows();
+                }
+                if (save_option == "y")
+                {
+                    writer.release();
                 }
             }
         }
@@ -327,7 +351,8 @@ private:
                 // --- 推理: 车辆 (TensorRT) ---
                 std::vector<Detection> detections;
                 try {
-                    detections = inferencethrow(*inf_car_, frame);
+                    detections = inferencethrow_trt(*inf_car_trt, frame);
+                    //detections = inferencethrow_onnx(*inf_car_onnx, frame);
                 } catch (const std::exception& e) {
                     RCLCPP_ERROR(this->get_logger(), "Inference error: %s", e.what());
                     return;
@@ -357,7 +382,7 @@ private:
 
                         
                         //RCLCPP_INFO(this->get_logger(), "一共有: %i 个目标", msg.class_number);
-                        
+
                 }
                 publisher_detection->publish(msg);
                 cv::imshow("Detection", frame);
@@ -376,7 +401,8 @@ private:
     std::string colcor_ = "blue";
     std::vector<std::string> classes_car_;
     std::vector<std::string> classes_armor_;
-    std::unique_ptr<Inference_trt> inf_car_;
+    std::unique_ptr<Inference_trt> inf_car_trt;
+    //std::unique_ptr<Inference> inf_car_onnx;
     std::unique_ptr<Inference> inf_armor_;
     BYTETracker tracker_;
     cv::VideoCapture cap_;
