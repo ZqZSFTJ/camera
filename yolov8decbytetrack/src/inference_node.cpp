@@ -125,12 +125,12 @@ public:
         std::vector<std::string> classes_blue{"B1", "B2", "B3", "B4", "B5", "B7"};
 
         // TensorRT engine paths (adjust to your environment)
-        std::string car_engine = "/home/zqz/ros2_ws/model2/best5_2.engine";
+        std::string car_engine = "/home/zqz/ros2_ws/model2/best8.engine";
         //
         Inference inf_armor("/home/zqz/ros2_ws/model2/armor.onnx", cv::Size(640, 640), classes_armor, runOnGPU_);
         inf_armor_ = std::make_unique<Inference>(inf_armor);
         // create TensorRT inference instance for car detection
-        inf_car_ = std::make_unique<Inference_trt>(car_engine, cv::Size(640,640), classes_all, runOnGPU_);
+        inf_car_ = std::make_unique<Inference_trt>(car_engine, cv::Size(1024,1024), classes_all, runOnGPU_);
         inf_car_->setModelConfidenceThreshold(0.25f);
         inf_car_->setLetterBoxForSquare(true);
 

@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.5)
 project(yolov8decbytetrack)
 
+set(CMAKE_BUILD_TYPE Debug)
+
 # ===================== C++ 标准 =====================
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

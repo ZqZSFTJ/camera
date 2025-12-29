@@ -10,6 +10,10 @@
 #include <random>
 #include <memory>
 
+#include <chrono>
+#include <iostream>
+#include <iomanip>
+
 // OpenCV / DNN / Inference
 #include <opencv2/imgproc.hpp>
 #include <opencv2/opencv.hpp>
@@ -105,7 +109,7 @@ private:
     cv::Size2f modelShape{};
 
     float modelConfidenceThreshold {0.25};
-    float modelScoreThreshold      {0.45};
+    float modelScoreThreshold      {0.60};
     float modelNMSThreshold        {0.50};
 
     bool letterBoxForSquare = true;
@@ -189,7 +193,7 @@ private:
     cv::Size2f modelShape{};
 
     float modelConfidenceThreshold {0.25};
-    float modelScoreThreshold      {0.45};
+    float modelScoreThreshold      {0.51};
     float modelNMSThreshold        {0.50};
 
     bool letterBoxForSquare = true;

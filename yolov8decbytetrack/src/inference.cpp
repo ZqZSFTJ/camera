@@ -34,7 +34,10 @@ inline float sigmoid(float x)
 
 void nms_(std::vector<Detection>& detections,float iouThreshold)
 {
+    auto t_post_start = std::chrono::high_resolution_clock::now();
     std::sort(detections.begin(), detections.end(),[](const Detection& a, const Detection& b) {return a.confidence > b.confidence;});
+    //std::cout << "detections size before nms: " << detections.size() << std::endl;
+    
     std::vector<bool> keep(detections.size(), true);
 
     for (size_t i = 0; i < detections.size(); i++)
@@ -51,12 +54,18 @@ void nms_(std::vector<Detection>& detections,float iouThreshold)
             if (iou > iouThreshold) keep[j] = false;
         }
     }
+    auto t_post_end = std::chrono::high_resolution_clock::now();
     std::vector<Detection> nmsDetections;
     for (size_t i = 0; i< detections.size(); i++)
     {
         if (keep[i]) nmsDetections.push_back(detections[i]);
     }
     detections = std::move(nmsDetections);
+    double post_ms = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(t_post_end - t_post_start).count();
+    //std::cout << std::fixed << std::setprecision(2)
+    //            << " post:" << post_ms
+    //            << std::endl;
+
 }
 
 static void print_dims(const nvinfer1::Dims& d)
@@ -292,6 +301,25 @@ void Inference_trt::loadTensorRTEngine(const std::string &enginePath)
     //std::cout << "input dims:" ;print_dims(inputDims);
     //std::cout <<"output dims:" ;print_dims(outputDims);
     
+    if (inputDims.nbDims >= 3)
+    {
+        int H = 0;
+        int W = 0;
+        if(inputDims.nbDims == 4) //NCHW
+        {
+            H = inputDims.d[2];
+            W = inputDims.d[3];
+        }
+        else if(inputDims.nbDims ==3) //CHW
+        {
+            H = inputDims.d[1];
+            W = inputDims.d[2];
+        }
+        if(H >0 && W >0)
+        {
+            modelShape = cv::Size(W,H);
+        }
+    }
     // 获取数据类型
     nvinfer1::DataType inputDataType = trtEngine->getTensorDataType(inputTensorName.c_str());
     nvinfer1::DataType outputDataType = trtEngine->getTensorDataType(outputTensorName.c_str());
@@ -302,7 +330,7 @@ void Inference_trt::loadTensorRTEngine(const std::string &enginePath)
     
     // 分配设备内存
     cudaMalloc(&deviceBuffers[inputIndex], inputSize);
-    cudaMalloc(&deviceBuffers[outputIndex], outputSize);
+    cudaMalloc(&deviceBuffers[outputIndex], outputSize);    
 
     buffers = deviceBuffers.data();
     
@@ -310,7 +338,7 @@ void Inference_trt::loadTensorRTEngine(const std::string &enginePath)
     trtContext->setInputTensorAddress(inputTensorName.c_str(), deviceBuffers[inputIndex]);
     trtContext->setOutputTensorAddress(outputTensorName.c_str(), deviceBuffers[outputIndex]);
     
-    std::cout << "TensorRT engine loaded successfully" << std::endl;
+    //std::cout << "TensorRT engine loaded successfully" << std::endl;
     //std::cout << "" << std::endl;
     //std::cout << "Input tensor: " << inputTensorName << ", size: " << inputSize << " bytes" << std::endl;
     //std::cout << "Output tensor: " << outputTensorName << ", size: " << outputSize << " bytes" << std::endl;
@@ -326,11 +354,15 @@ std::vector<Detection> Inference_trt::runInference_TensorRT(const cv::Mat &input
         throw std::runtime_error("TensorRT engine not loaded");
     }
 
+    auto t_start = std::chrono::high_resolution_clock::now();
+
     cv::Mat modelInput = input;
     int pad_x, pad_y;
     float scale;
     if (letterBoxForSquare && modelShape.width == modelShape.height)
         modelInput = formatToSquare(modelInput, &pad_x, &pad_y, &scale);
+    // --- 预处理 ---
+    auto t_pre_start = std::chrono::high_resolution_clock::now();
     cv::Mat inputBlob;
     cv::dnn::blobFromImage(modelInput, inputBlob, 1.0/255.0, modelShape, cv::Scalar(), true, false);
     size_t blob_bytes = inputBlob.total() * inputBlob.elemSize();
@@ -339,21 +371,37 @@ std::vector<Detection> Inference_trt::runInference_TensorRT(const cv::Mat &input
         std::cerr << "Warning: input blob size (" << blob_bytes << ") > expected inputSize (" << inputSize << "). Using min size to copy.\n";
     }
     size_t copy_bytes = std::min(blob_bytes, inputSize);
+    auto t_pre_end = std::chrono::high_resolution_clock::now();
 
     std::vector<float> inputData(inputSize / sizeof(float), 0.0f);
     memcpy(inputData.data(), inputBlob.data, copy_bytes);
 
+    // --- H2D (measure) ---
+    auto t_h2d_start = std::chrono::high_resolution_clock::now();
     cudaError_t err_mem1 = cudaMemcpyAsync(deviceBuffers[inputIndex], inputData.data(), inputSize, cudaMemcpyHostToDevice, cudaStream);
     if(err_mem1 != cudaSuccess)
     {
         std::cerr << "cudamem failed" << cudaGetErrorString(err_mem1) << std::endl;
         throw std::runtime_error("cudamem failed");
     }
+    auto t_h2d_end = std::chrono::high_resolution_clock::now();
 
+    // --- 推理 ---
+    auto t_inf_start = std::chrono::high_resolution_clock::now();
     if (!trtContext->enqueueV3(cudaStream)) {
         throw std::runtime_error("Failed to execute inference");
     }
+    
+    cudaError_t err_stream = cudaStreamSynchronize(cudaStream);
+    if (err_stream != cudaSuccess)
+    {
+        std::cerr << "cudastream failed" << cudaGetErrorString(err_stream) << std::endl;
+        throw std::runtime_error("cudastream failed");
+    }
+    auto t_inf_end = std::chrono::high_resolution_clock::now();
 
+    // --- D2H ---
+    auto t_d2h_start = std::chrono::high_resolution_clock::now();
     std::vector<float> outputData(outputSize / sizeof(float));
     cudaError_t err_mem2 = cudaMemcpyAsync(outputData.data(), deviceBuffers[outputIndex], outputSize, cudaMemcpyDeviceToHost, cudaStream);
     if(err_mem2 != cudaSuccess)
@@ -361,18 +409,21 @@ std::vector<Detection> Inference_trt::runInference_TensorRT(const cv::Mat &input
         std::cerr << "cudamem failed" << cudaGetErrorString(err_mem2) << std::endl;
         throw std::runtime_error("cudamem failed");
     }
-    cudaError_t err_stream = cudaStreamSynchronize(cudaStream);
-    if (err_stream != cudaSuccess)
+    cudaError_t err_sync = cudaStreamSynchronize(cudaStream);
+    if (err_sync != cudaSuccess)
     {
-        std::cerr << "cudastream failed" << cudaGetErrorString(err_stream) << std::endl;
-        throw std::runtime_error("cudastream failed");
+        std::cerr << "cudaStreamSynchronize after D2H failed: " << cudaGetErrorString(err_sync) << std::endl;
+        throw std::runtime_error("cudaStreamSynchronize failed");
     }
+    auto t_d2h_end = std::chrono::high_resolution_clock::now();
     //nvinfer1::Dims outputDims = trtEngine->getTensorShape(outputTensorName.c_str());
     //float* output = static_cast<float*>(buffers[outputIndex]);
+
+    //---- postprocess + nms ----
+    //auto t_post_start = std::chrono::high_resolution_clock::now();
     float* output = outputData.data();
     std::vector<Detection> detections;
     
-    // 在loadTensorRTEngine函数中添加
     nvinfer1::Dims outputDims = trtEngine->getTensorShape(outputTensorName.c_str());
     //print_dims(outputDims);
     
@@ -424,8 +475,28 @@ std::vector<Detection> Inference_trt::runInference_TensorRT(const cv::Mat &input
             //        << " is_field_major=" << is_field_major << std::endl;
         }
     }
-
-
+    else if (outputDims.nbDims == 2)
+    {
+        num_preds = outputDims.d[0];
+        elem_per_pred = outputDims.d[1];
+        is_field_major = false; // layout: [N, elem_per_pred]
+        //std::cout << "DEBUG layout: pred-major [N, elem_per_pred], elem_per_pred=" << elem_per_pred << ", num_preds=" << num_preds << std::endl;
+    }
+    else 
+    {
+        size_t total_elems = outputSize / sizeof(float);
+        if (total_elems % 5 == 0)
+        {
+            elem_per_pred = 5;
+            num_preds = static_cast<int>(total_elems / 5);
+            is_field_major = true; // layout: [N,5]
+            //std::cout << "DEBUG fallback flat layout: elem_per_pred=5, num_preds=" << num_preds << std::endl;
+        }
+        else
+        {
+            throw std::runtime_error("Unsupported output dimensions");
+        }
+    }
     //int num_preds = outputDims.d[2];
     //int elem_per_pred = 5;
     
@@ -446,23 +517,63 @@ std::vector<Detection> Inference_trt::runInference_TensorRT(const cv::Mat &input
 
     //std::vector<Detection> detections;
     detections.reserve(std::min(num_preds, 4096));
-    const int INPUT_SIZE = 640;
+    const int INPUT_SIZE = modelShape.width; // assume square input
+    //const int INPUT_SIZE = 640;
     const int strides[3] = {8, 16, 32};
     const int grids[3]   = {80, 40, 20};
     for (int i = 0; i <num_preds; i++)
     {
-        float conf = output[4 * num_preds + i];
-        if (conf < modelScoreThreshold) continue;
-        float best_score = sigmoid(conf);
-        float cx = output[0 * num_preds + i];
-        float cy = output[1 * num_preds + i];
-        float w  = output[2 * num_preds + i];
-        float h  = output[3 * num_preds + i];
+        float raw_obj = get_output(i, 4);
+        float conf_obj = sigmoid(raw_obj);
+        if (conf_obj < modelScoreThreshold) continue;
+
+        float cx = get_output(i, 0);
+        float cy = get_output(i, 1);
+        float w  = get_output(i, 2);
+        float h  = get_output(i, 3);
+
+        bool likely_normalized = (std::abs(cx) <= 1.01f && std::abs(cy) <= 1.01f && std::abs(w) <= 1.01f && std::abs(h) <= 1.01f);
+        if (likely_normalized && INPUT_SIZE > 0) {
+            cx *= INPUT_SIZE;
+            cy *= INPUT_SIZE;
+            w  *= INPUT_SIZE;
+            h  *= INPUT_SIZE;
+        }
+
+        //float conf = output[4 * num_preds + i];
+        //if (conf < modelScoreThreshold) continue;
+        //float best_score = sigmoid(conf);
+        //float cx = output[0 * num_preds + i];
+        //float cy = output[1 * num_preds + i];
+        //float w  = output[2 * num_preds + i];
+        //float h  = output[3 * num_preds + i];
 
         float x1 = cx - w * 0.5f;
         float y1 = cy - h * 0.5f;
         float x2 = cx + w * 0.5f;
         float y2 = cy + h * 0.5f;
+
+        // handle category logits if present (elem_per_pred > 5)
+        int best_class = 0;
+        float best_class_score = 0.0f;
+        if (elem_per_pred > 5)
+        {
+            int num_classes = elem_per_pred - 5;
+            // find argmax among class logits
+            for (int c = 0; c < num_classes; ++c)
+            {
+                float cls_raw = get_output(i, 5 + c);
+                float cls_prob = sigmoid(cls_raw);
+                if (c == 0 || cls_prob > best_class_score)
+                {
+                    best_class_score = cls_prob;
+                    best_class = c;
+                }
+            }
+            // combine objectness and class prob (optional) - here we use product
+            float combined_conf = conf_obj * best_class_score;
+            if (combined_conf < modelScoreThreshold) continue;
+        }
 
         // de-letterbox
         x1 = (x1 - pad_x) / scale;
@@ -474,13 +585,14 @@ std::vector<Detection> Inference_trt::runInference_TensorRT(const cv::Mat &input
         y1 = std::clamp(y1, 0.f, static_cast<float>(input.rows - 1));
         x2 = std::clamp(x2, 0.f, static_cast<float>(input.cols - 1));
         y2 = std::clamp(y2, 0.f, static_cast<float>(input.rows - 1));
-        int best_class = 0;
+        //int best_class = 0;
         Detection det;
         det.box = cv::Rect(static_cast<int>(std::round(x1)),
                            static_cast<int>(std::round(y1)),
                            static_cast<int>(std::round(x2 - x1)),
                            static_cast<int>(std::round(y2 - y1)));
-        det.confidence = best_score;
+        det.confidence = conf_obj;
+        
         if (!classes.empty())
         {
             if (best_class >=0 && best_class <static_cast<int>(classes.size()))
@@ -497,14 +609,28 @@ std::vector<Detection> Inference_trt::runInference_TensorRT(const cv::Mat &input
             det.className = (best_class >=0) ? ("class_" + std::to_string(best_class)) : "unknown";
         }
 
-
-
-
-
         detections.push_back(det);
     }
-
+    
     nms_(detections,0.1f);
+    //auto t_post_end = std::chrono::high_resolution_clock::now();
+
+    // --- 计时输出 ---
+    double pre_ms = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(t_pre_end - t_pre_start).count();
+    double h2d_ms = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(t_h2d_end - t_h2d_start).count();
+    double inf_ms = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(t_inf_end - t_inf_start).count();
+    double d2h_ms = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(t_d2h_end - t_d2h_start).count();
+    //double post_ms = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(t_post_end - t_post_start).count();
+    //double total_ms = std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(t_post_end - t_start).count();
+
+    //std::cout << std::fixed << std::setprecision(2)
+    //          << "Timing (ms): pre=" << pre_ms
+    //          << " h2d=" << h2d_ms
+    //          << " infer=" << inf_ms
+    //          << " d2h=" << d2h_ms
+              //<< " post=" << post_ms
+              //<< " total=" << total_ms
+    //          << std::endl;
 
 
     //size_t total_elems = outputSize / sizeof(float);
